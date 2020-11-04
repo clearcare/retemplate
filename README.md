@@ -7,7 +7,7 @@ This code almost certainly does not work on non-Unix systems, as it relies on Un
 and file ownership to operate. I have no plans to make this work on Windows.
 
 ## Use Case
-Let's say you have an instance of (PyHiAPI)[https://github.com/ryanjjung/pyhiapi] running out of `/opt/hiapi` and it is kept alive by a (supervisord)[http://supervisord.org/] configuration. Furthermore, let's say the message returned by HiAPI should match the value stored in a Redis server in a key called `hiapi.message`. So you feed `-c /opt/hiapi/config.txt` to hiapi in your supervisord config so it cares about the content of that file. Then you configure Retemplate to generate that file based on a template. You might create a template at `/etc/retemplate/hiapi.config.j2` that looks like this:
+Let's say you have an instance of [PyHiAPI](https://github.com/ryanjjung/pyhiapi) running out of `/opt/hiapi` and it is kept alive by a [supervisord](http://supervisord.org/) configuration. Furthermore, let's say the message returned by HiAPI should match the value stored in a Redis server in a key called `hiapi.message`. So you feed `-c /opt/hiapi/config.txt` to hiapi in your supervisord config so it cares about the content of that file. Then you configure Retemplate to generate that file based on a template. You might create a template at `/etc/retemplate/hiapi.config.j2` that looks like this:
 
     rtpl://redis-local/hiapi_message
 
