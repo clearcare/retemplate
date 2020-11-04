@@ -1,0 +1,86 @@
+#!/bin/env python3
+
+import logging
+import json
+import retemplate
+import sys
+import yaml
+
+from argparse import ArgumentParser
+from threading import Thread
+
+'''
+This file serves as an entry point to the module's features, and is the recommended method of
+executing templates.
+'''
+
+def parseargs():
+    '''
+    Interpets command line arguments
+    '''
+
+    parser = ArgumentParser(description='Schedule file templating')
+    parser.add_argument('-c', '--config',
+                        help='Config file to read in',
+                        default='config.yml')
+    return parser.parse_args()
+
+def main():
+    '''
+    Main entry point to the rtpl utility. This handles configuration of the application before
+    launching Retemplate objects as simultaneous threads.
+    '''
+
+    args = parseargs()
+    config = dict()
+    stores = dict()
+    templates = list()
+    threads = list()
+
+    # Parse the config file
+    try:
+        with open(args.config, 'r') as fh:
+            config = yaml.load(fh.read(), Loader=yaml.FullLoader)
+    except IOError:
+        logging.error('Could not read config file: {}'.format(args.config))
+        sys.exit(1)
+
+    # Configure logging
+    logcfg = {
+        'level': 'INFO',
+        'filename': None,
+        'format': None
+    }
+    if 'retemplate' in config and 'logging' in config['retemplate']:
+        logcfg.update(config['retemplate']['logging'])
+        logging.basicConfig(**logcfg)
+    logging.debug('Logging configured')
+
+    # Configure DataStores
+    for store in config['stores']:
+        config['stores'][store]['name'] = store
+        if config['stores'][store]['type'] == 'redis':
+            stores[store] = retemplate.RedisStore(**config['stores'][store])
+        logging.debug('Configured data store {}'.format(store))
+
+    # Configure templates
+    for target in config['templates']:
+        template = config['templates'][target]['template']
+        del(config['templates'][target]['template'])
+        tpl = retemplate.Retemplate(target, template, stores, **config['templates'][target])
+        templates.append(tpl)
+        logging.debug('Configured template for target {}'.format(target))
+
+    # Run each template as a thread
+    for tpl in templates:
+        thread = Thread(target=tpl.run)
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to finish before exiting
+    # (They should only ever finish if they error out, since they run in infinite loops)
+    for thread in threads:
+        thread.join()
+
+if __name__ == '__main__':
+    main()
