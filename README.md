@@ -10,6 +10,10 @@ The included `config.yml.example` file provides a sample configuration for Retem
 This code almost certainly does not work on non-Unix systems, as it relies on Unix-style permissions
 and file ownership to operate. I have no plans to make this work on Windows.
 
+## Installing It
+
+    pip install retemplate
+
 ## Running It
 Place a `config.yml` file in the cwd, or specify a config file with `-c`.
 
