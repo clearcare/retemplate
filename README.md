@@ -1,20 +1,29 @@
 # retemplate
-A module to execute a Jinja template on a schedule, supporting several backends for value storage
+A module to execute a Jinja template on a schedule, supporting multiple backends for value storage.
 
-The included `config.yml.example` file provides an ideal configuration with dummy (non-working) values.
+Currently supported backends:
+- Redis
+- AWS Secrets Manager
+
+The included `config.yml.example` file provides a sample configuration for Retemplate.
 
 This code almost certainly does not work on non-Unix systems, as it relies on Unix-style permissions
 and file ownership to operate. I have no plans to make this work on Windows.
 
+## Running It
+Place a `config.yml` file in the cwd, or specify a config file with `-c`.
+
+    rtpl -c /etc/retemplate.yml
+
 ## Use Case
 Let's say you have an instance of [PyHiAPI](https://github.com/ryanjjung/pyhiapi) running out of `/opt/hiapi` and it is kept alive by a [supervisord](http://supervisord.org/) configuration. Furthermore, let's say the message returned by HiAPI should match the value stored in a Redis server in a key called `hiapi.message`. So you feed `-c /opt/hiapi/config.txt` to hiapi in your supervisord config so it cares about the content of that file. Then you configure Retemplate to generate that file based on a template. You might create a template at `/etc/retemplate/hiapi.config.j2` that looks like this:
 
-    rtpl://redis-local/hiapi_message
+    rtpl://local-redis/hiapi_message
 
 Then create a config file for retemplate that contains these elements:
 
     stores:
-      redis-local:
+      local-redis:
         type: redis
         host: localhost
         port: 6379
