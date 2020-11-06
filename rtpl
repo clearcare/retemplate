@@ -58,9 +58,10 @@ def main():
 
     # Configure DataStores
     for store in config['stores']:
-        config['stores'][store]['name'] = store
         if config['stores'][store]['type'] == 'redis':
-            stores[store] = retemplate.RedisStore(**config['stores'][store])
+            stores[store] = retemplate.RedisStore(store, **config['stores'][store])
+        if config['stores'][store]['type'] == 'aws-secrets-manager':
+            stores[store] = retemplate.AwsSecretsManagerStore(store, **config['stores'][store])
         logging.debug('Configured data store {}'.format(store))
 
     # Configure templates

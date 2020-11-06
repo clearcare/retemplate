@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 
+from urllib.parse import urlparse, parse_qs
 from time import sleep
 
 # Custom exceptions
@@ -25,10 +26,13 @@ class ConfigurationError(Exception):
 class DataStore(object):
     '''
     DataStore is essentially an interface for specific methods of accessing
-    data. It can't be instantiated. Only implementations can be instantiated.
+    data.
+
+    Arguments:
+        name (str): An arbitrary name for the DataStore
     '''
-    def __init__(self, **kwargs):
-        raise NotImplementedError
+    def __init__(self, name, *args, **kwargs):
+        self.name = name
 
     def get_value(self, key):
         raise NotImplementedError
@@ -36,46 +40,36 @@ class DataStore(object):
 
 class AwsSecretsManagerStore(DataStore):
     '''
-    A DataStore to fetch secrets from AWS Secrets Manager
-
-    Arguments:
-        config (dict): A dictionary containing any of the following keys:
-            aws_access_key_id: Your AWS key for authentication
-            secret_access_key: Your secret key for authentication
-            region: The region to operate the boto3 client in
-
-    If you do not provide authentication data, boto3 will attempt to use environment variables to
-    authenticate. Failing that, you'll get exceptions trying to run this.
+    A DataStore to fetch secrets from AWS Secrets Manager. Arguments for this constructor map to the
+    [boto3 client documentation]
+    (https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html#boto3.session.Session.client).
     '''
-    def __init__(self, config):
-        kwargs = dict()
-        if 'aws_access_key_id' in config:
-            kwargs['aws_access_key_id'] = config['aws_access_key_id']
-        if 'secret_access_key' in config:
-            kwargs['aws_secret_access_key'] = config['secret_access_key']
-        if 'region' in config:
-            kwargs['region_name'] = config['region']
-
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(self, name, *args, **kwargs)
+        # boto won't like our "type" key, so del it
+        if 'type' in kwargs: del kwargs['type']
         self.client = boto3.client('secretsmanager', **kwargs)
 
-    def get_value(self, key, version_id=None, version_stage=None):
-        if version_id and version_stage:
-            raise ConfigurationError('Cannot use version_id and version_stage at once')
-        kwargs = {}
-        if version_id:
-            kwargs['VersionID'] = version_id
-        if version_stage:
-            kwargs['VersionStage'] = version_stage
+    def get_value(self, key, **kwargs):
+        '''
+        Retrieves the value of a AWS Secrets Manager secret
 
-        return self.client.get_secret_value(SecretId=key, **kwargs)['SecretString']
+        Arguments:
+            key (str): The SecretId of the secret. If you supply an explicit SecretId as part of
+                additional keyword arguments, this argument will be ignored.
+
+        '''
+        if 'SecretId' not in kwargs:
+            kwargs['SecretId'] = key
+        return self.client.get_secret_value(**kwargs)['SecretString']
 
 
-class RedisStore(object):
+class RedisStore(DataStore):
     '''
     A RedisStore is a DataStore implementation that uses a Redis backend
 
     Arguments:
-        name (str): An arbitrary name for the store, like 'redis-local' (default: 'redis')
+        name (str): An arbitrary name for the store, like 'local-redis' (default: 'redis')
         host (str): Hostname to connect to (default: 'localhost')
         port (int): The port Redis runs on at that host (default: 6379)
         db (int): The logical database ID to use (default: 0)
@@ -83,9 +77,9 @@ class RedisStore(object):
         ssl (bool): Whether or not to encrypt traffic to the Redis store (default: False)
     '''
 
-    def __init__(self, **kwargs):
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
         self.settings = {
-            'name': 'redis',
             'host': 'localhost',
             'port': 6379,
             'db': 0,
@@ -100,7 +94,7 @@ class RedisStore(object):
             password=self.settings['auth_token'])
 
     def get_value(self, key):
-        logging.debug('RedisStore {} getting key {}'.format(self.settings['name'], key))
+        logging.debug('RedisStore {} getting key {}'.format(self.name, key))
         return self.client.get(key)
 
 
@@ -136,17 +130,26 @@ class Retemplate(object):
         Breaks down the given URI to identify a DataStore and retrieve a value from it
 
         Arguments:
-            uri (str): A Retemplate URI in the form of `rtpl://datastore-name/key-name`
+            uri (str): A Retemplate URI in the form of
+                `rtpl://datastore-name/key-name?param1=val1&paramN=valN`
         '''
 
         if not uri.startswith('rtpl://'):
             raise ConfigurationError('Malformed retemplate URI: {}'.format(uri))
-        uri = uri[7:]
-        parts = uri.split('/')
-        store = self.stores[parts[0]]
-        key = parts[1]
-        value = store.get_value(key)
-        logging.debug('redisstore {} got value \'{}\' for key \'{}\''.format(parts[0], value, key))
+
+        url = urlparse(uri)
+        qs = parse_qs(url.query)
+
+        # qs looks like this, with lists for values:
+        # {'param1': ['val1'], 'paramN': ['valN']}
+        # So just cat them together
+        for q in qs:
+            qs[q] = ''.join(qs[q])
+
+        store = self.stores[url.netloc]
+        key = url.path[1:] # path always starts with a '/'; cut it out
+        value = store.get_value(key, **qs)
+        logging.debug('Store {} got value \'{}\' for key \'{}\''.format(store.name, value, key))
         return value
 
     def render(self):
@@ -166,14 +169,19 @@ class Retemplate(object):
                 self.template, self.target))
             return False
 
-        match = re.search('(rtpl://.*)\s', tpl)
-        groups = match.groups()
-        for group in groups:
-            value = self.resolve_value(group)
-            if type(value) == bytes:
-                value = value.decode()
-            tpl = tpl.replace(group, value)
-        return jinja2.Template(tpl).render()
+        tpl = tpl.split('\n')
+        prerender = list()
+        for line in tpl:
+            match = re.search('(rtpl://.*)\s?', line)
+            if match:
+                groups = match.groups()
+                for group in groups:
+                    value = self.resolve_value(group)
+                    if type(value) == bytes:
+                        value = value.decode()
+                    prerender.append(line.replace(group, value))
+        prerender = '\n'.join(prerender)
+        return jinja2.Template(prerender).render()
 
     def write_file(self, content):
         '''
@@ -235,7 +243,7 @@ class Retemplate(object):
                 with open(self.target, 'r') as fh:
                     current_version = fh.read()
             except IOError:
-                logging.error('Cannot read target file {}'.format(target))
+                logging.error('Cannot read target file {}'.format(self.target))
                 break
 
             if new_version != current_version:

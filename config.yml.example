@@ -10,6 +10,9 @@ stores:
     port: 6379
     db: 0
     ssl: False
+  secrets-manager:
+    type: aws-secrets-manager
+    region_name: us-west-2
 templates:
   /opt/hiapi/config.txt:
     template: /etc/retemplate/hiapi.config.j2
