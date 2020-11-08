@@ -3,7 +3,8 @@ A module to execute a Jinja template on a schedule, supporting multiple backends
 
 Currently supported backends:
 - Redis
-- AWS Secrets Manager
+- AWS Secrets Manager Plaintext Secrets
+- AWS Systems Manager Parameters
 
 The included `config.yml.example` file provides a sample configuration for Retemplate.
 
