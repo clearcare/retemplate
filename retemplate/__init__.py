@@ -64,6 +64,32 @@ class AwsSecretsManagerStore(DataStore):
         return self.client.get_secret_value(**kwargs)['SecretString']
 
 
+class AwsSystemsManagerStore(DataStore):
+    '''
+    A DataStore to fetch secrets from AWS Systems Manager. Arguments for this constructor map to the
+    [boto3 client documentation]
+    (https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html#boto3.session.Session.client).
+    '''
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(self, name, *args, **kwargs)
+        # boto won't like our "type" key, so del it
+        if 'type' in kwargs: del kwargs['type']
+        self.client = boto3.client('ssm', **kwargs)
+
+    def get_value(self, key, **kwargs):
+        '''
+        Retrieves the value of a AWS Systems Manager secret
+
+        Arguments:
+            key (str): The Name of the parameter. If you supply an explicit Name as part of
+                additional keyword arguments, this argument will be ignored.
+
+        '''
+        if 'Name' not in kwargs:
+            kwargs['Name'] = key
+        return self.client.get_parameter(**kwargs)['Parameter']['Value']
+
+
 class RedisStore(DataStore):
     '''
     A RedisStore is a DataStore implementation that uses a Redis backend
