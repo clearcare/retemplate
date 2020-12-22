@@ -156,7 +156,7 @@ class LocalExecutionStore(DataStore):
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         try:
-            self.command = args[0]
+            self.command = kwargs['command']
         except IndexError:
             logging.error(
                 'Cannot register local-exec store {} because no command has been supplied'\
@@ -165,7 +165,7 @@ class LocalExecutionStore(DataStore):
     def get_value(self, key):
         subp_args = [ self.command, key ]
         proc = subprocess.run(subp_args, capture_output=True)
-        return proc.stdout()
+        return proc.stdout.decode('utf-8')
 
 
 class Retemplate(object):
@@ -194,6 +194,7 @@ class Retemplate(object):
             'frequency': 60
         }
         self.settings.update(kwargs)
+        self.vars = dict()
 
     def resolve_value(self, uri):
         '''
@@ -222,27 +223,59 @@ class Retemplate(object):
         logging.debug('Store {} got value \'{}\' for key \'{}\''.format(store.name, value, key))
         return value
 
-    def render(self):
-        '''
-        Renders a template in two phases. First, "rtpl" URIs are resolved (see resolve_value). Then,
-        the template is passed through the Jinja interpreter. The final text is returned.
-        '''
-
-        # Look for prerender values that match this URI format:
-        # rtpl://type?param1=val1&param2=val2
-        logging.info('Rendering template {} for target {}'.format(self.template, self.target))
+    def read_template(self):
         try:
             with open(self.template, 'r') as fh:
-                tpl = fh.read()
+                return fh.read()
         except IOError:
             logging.error('Cannot access template file {} for target {}'.format(
                 self.template, self.target))
             return False
 
+    def preprocess(self, tpl):
+        '''
+        Scan the template looking for lines with this kind of variable assignment in it:
+
+            {<message = rtpl://something>}
+
+        Then look for places where the variable gets used like this...
+
+            {<message>}
+
+        ...and replace those with the actual value.
+        '''
+        lines = tpl.split('\n')
+        stage_one = list()
+        stage_two = list()
+
+        for line in lines:
+            # Assignments must be the only thing on the line
+            match = re.search('^{<(.*)=(.*)>}$', line)
+            if match:
+                groups = [ gp.strip() for gp in match.groups() ]
+                if groups[1].startswith('rtpl://'):
+                    self.vars[groups[0]] = self.resolve_value(groups[1])
+                else:
+                    self.vars[groups[0]] = groups[1]
+            else:
+                stage_one.append(line)
+
+        for line in stage_one:
+            for var in self.vars:
+                line = line.replace('{{<{}>}}'.format(var), self.vars[var])
+            stage_two.append(line)
+
+        return '\n'.join(stage_two)
+
+    def process(self, tpl):
+        '''
+        Look for "rtpl://" URIs and replace them with the values they reference.
+        '''
+
         tpl = tpl.split('\n')
         prerender = list()
         for line in tpl:
-            match = re.search('(rtpl://.*)\s?', line)
+            match = re.search('(rtpl://[a-zA-Z0-9-_/]*)', line)
             if match:
                 groups = match.groups()
                 for group in groups:
@@ -250,8 +283,35 @@ class Retemplate(object):
                     if type(value) == bytes:
                         value = value.decode()
                     prerender.append(line.replace(group, value))
-        prerender = '\n'.join(prerender)
-        return jinja2.Template(prerender).render()
+            else:
+                prerender.append(line)
+        return '\n'.join(prerender)
+
+    def render(self):
+        '''
+        Renders a template in three phases:
+            1. The template is "preprocessed" looking for special variable assignments that look
+               like this: {<varname = rtpl://source/key>}. These are resolved and the variables
+               stored internally. Then, references to that variable are replaced with the value.
+               Variable references look like this: {<varname>}
+            2. Ordinary rtpl URIs are resolved.
+            3. The template is passed through the Jinja interpreter.
+        The final text is returned.
+
+        This three-phase approach allows you to build more complex lookups. For example, suppose you
+        need to look up the name of the environment the template is being run in with a local-exec
+        call, then later need to look up an AWS Secrets Manager value using that environment name.
+        You might have to do something like this:
+
+            {<env = rtpl://tag-finder/environment>}
+            password: rtpl://secrets/{<env>}.the_password
+        '''
+
+        logging.info('Rendering template {} for target {}'.format(self.template, self.target))
+        tpl = self.read_template()
+        tpl = self.preprocess(tpl)
+        tpl = self.process(tpl)
+        return jinja2.Template(tpl).render()
 
     def write_file(self, content):
         '''
@@ -314,7 +374,7 @@ class Retemplate(object):
                     current_version = fh.read()
             except IOError:
                 logging.error('Cannot read target file {}'.format(self.target))
-                break
+                current_version = None
 
             if new_version != current_version:
                 logging.info('New version of target {} detected'.format(self.target))
