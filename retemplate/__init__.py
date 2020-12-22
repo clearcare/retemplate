@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import redis
+import requests
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,29 @@ class DataStore(object):
         raise NotImplementedError
 
 
+class AwsLocalMetadataServer(DataStore):
+    '''
+    A DataStore to get data from the local metadata server that runs on AWS instances
+    '''
+
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(self, name, *args, **kwargs)
+
+    def get_value(self, key, **kwargs):
+        '''
+        Retrieves the response body of a call to the AWS local metadata server, or an empty string
+        if no such value exists.
+
+        Arguments:
+            key(str): The path to make the request to
+        '''
+
+        resp = requests.get('http://169.254.169.254/{}'.format(key))
+        if resp.status_code == 200:
+            return resp.text
+        return ''
+
+
 class AwsSecretsManagerStore(DataStore):
     '''
     A DataStore to fetch secrets from AWS Secrets Manager. Arguments for this constructor map to the
@@ -57,8 +81,8 @@ class AwsSecretsManagerStore(DataStore):
         Arguments:
             key (str): The SecretId of the secret. If you supply an explicit SecretId as part of
                 additional keyword arguments, this argument will be ignored.
-
         '''
+
         if 'SecretId' not in kwargs:
             kwargs['SecretId'] = key
         return self.client.get_secret_value(**kwargs)['SecretString']
@@ -122,6 +146,26 @@ class RedisStore(DataStore):
     def get_value(self, key):
         logging.debug('RedisStore {} getting key {}'.format(self.name, key))
         return self.client.get(key)
+
+
+class LocalExecutionStore(DataStore):
+    '''
+    A DataStore that issues a terminal command and uses its standard output as a template value.
+    '''
+
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+        try:
+            self.command = args[0]
+        except IndexError:
+            logging.error(
+                'Cannot register local-exec store {} because no command has been supplied'\
+                .format(name))
+
+    def get_value(self, key):
+        subp_args = [ self.command, key ]
+        proc = subprocess.run(subp_args, capture_output=True)
+        return proc.stdout()
 
 
 class Retemplate(object):
