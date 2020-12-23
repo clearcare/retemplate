@@ -23,7 +23,7 @@ class ConfigurationError(Exception):
         self.reason = reason
 
 
-# Value stores
+# Data stores
 class DataStore(object):
     '''
     DataStore is essentially an interface for specific methods of accessing
@@ -109,6 +109,16 @@ class AwsSystemsManagerStore(DataStore):
                 additional keyword arguments, this argument will be ignored.
 
         '''
+
+        # Parameter store key names begin with a slash, but the URI parser will
+        # strip that out because nothing else uses it. You can avoid this by starting
+        # parameter store paths with an extra slash, but here we'll add it back in
+        # just in case.
+        if key[0] != '/':
+            key = '/' + key
+
+        # "Name" is how SSM does parameter lookups. You should just use the key, but
+        # if you are so inclined, you can override it in the query string.
         if 'Name' not in kwargs:
             kwargs['Name'] = key
         return self.client.get_parameter(**kwargs)['Parameter']['Value']
@@ -162,8 +172,9 @@ class LocalExecutionStore(DataStore):
                 'Cannot register local-exec store {} because no command has been supplied'\
                 .format(name))
 
-    def get_value(self, key):
-        subp_args = [ self.command, key ]
+    def get_value(self, key, **kwargs):
+        subp_args = [ self.command ]
+        subp_args.extend(kwargs['arg'])
         proc = subprocess.run(subp_args, capture_output=True)
         return proc.stdout.decode('utf-8')
 
@@ -211,12 +222,6 @@ class Retemplate(object):
         url = urlparse(uri)
         qs = parse_qs(url.query)
 
-        # qs looks like this, with lists for values:
-        # {'param1': ['val1'], 'paramN': ['valN']}
-        # So just cat them together
-        for q in qs:
-            qs[q] = ''.join(qs[q])
-
         store = self.stores[url.netloc]
         key = url.path[1:] # path always starts with a '/'; cut it out
         value = store.get_value(key, **qs)
@@ -244,6 +249,7 @@ class Retemplate(object):
 
         ...and replace those with the actual value.
         '''
+
         lines = tpl.split('\n')
         stage_one = list()
         stage_two = list()
@@ -275,7 +281,7 @@ class Retemplate(object):
         tpl = tpl.split('\n')
         prerender = list()
         for line in tpl:
-            match = re.search('(rtpl://[a-zA-Z0-9-_/]*)', line)
+            match = re.search('(rtpl://[a-zA-Z0-9-_/=?&.]*)', line)
             if match:
                 groups = match.groups()
                 for group in groups:

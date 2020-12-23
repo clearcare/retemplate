@@ -4,6 +4,8 @@ retemplate:
     filename: retemplate.log
     format: '%(levelname)s,%(asctime)s,%(funcName)s,%(message)s'
 stores:
+  ec2-metadata:
+    type: aws-local-meta
   local-redis:
     type: redis
     host: localhost
