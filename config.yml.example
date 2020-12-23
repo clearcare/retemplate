@@ -18,6 +18,9 @@ stores:
   ssm:
     type: aws-systems-manager
     region_name: us-west-2
+  timestamp:
+    type: local-exec
+    command: date
 templates:
   /opt/hiapi/config.txt:
     template: /etc/retemplate/hiapi.config.j2
