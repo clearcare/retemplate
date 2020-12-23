@@ -4,6 +4,8 @@ retemplate:
     filename: retemplate.log
     format: '%(levelname)s,%(asctime)s,%(funcName)s,%(message)s'
 stores:
+  ec2-metadata:
+    type: aws-local-meta
   local-redis:
     type: redis
     host: localhost
@@ -16,6 +18,9 @@ stores:
   ssm:
     type: aws-systems-manager
     region_name: us-west-2
+  timestamp:
+    type: local-exec
+    command: date
 templates:
   /opt/hiapi/config.txt:
     template: /etc/retemplate/hiapi.config.j2

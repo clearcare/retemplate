@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import redis
+import requests
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ class ConfigurationError(Exception):
         self.reason = reason
 
 
-# Value stores
+# Data stores
 class DataStore(object):
     '''
     DataStore is essentially an interface for specific methods of accessing
@@ -36,6 +37,29 @@ class DataStore(object):
 
     def get_value(self, key):
         raise NotImplementedError
+
+
+class AwsLocalMetadataServer(DataStore):
+    '''
+    A DataStore to get data from the local metadata server that runs on AWS instances
+    '''
+
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(self, name, *args, **kwargs)
+
+    def get_value(self, key, **kwargs):
+        '''
+        Retrieves the response body of a call to the AWS local metadata server, or an empty string
+        if no such value exists.
+
+        Arguments:
+            key(str): The path to make the request to
+        '''
+
+        resp = requests.get('http://169.254.169.254/{}'.format(key))
+        if resp.status_code == 200:
+            return resp.text
+        return ''
 
 
 class AwsSecretsManagerStore(DataStore):
@@ -57,8 +81,8 @@ class AwsSecretsManagerStore(DataStore):
         Arguments:
             key (str): The SecretId of the secret. If you supply an explicit SecretId as part of
                 additional keyword arguments, this argument will be ignored.
-
         '''
+
         if 'SecretId' not in kwargs:
             kwargs['SecretId'] = key
         return self.client.get_secret_value(**kwargs)['SecretString']
@@ -85,6 +109,16 @@ class AwsSystemsManagerStore(DataStore):
                 additional keyword arguments, this argument will be ignored.
 
         '''
+
+        # Parameter store key names begin with a slash, but the URI parser will
+        # strip that out because nothing else uses it. You can avoid this by starting
+        # parameter store paths with an extra slash, but here we'll add it back in
+        # just in case.
+        if key[0] != '/':
+            key = '/' + key
+
+        # "Name" is how SSM does parameter lookups. You should just use the key, but
+        # if you are so inclined, you can override it in the query string.
         if 'Name' not in kwargs:
             kwargs['Name'] = key
         return self.client.get_parameter(**kwargs)['Parameter']['Value']
@@ -124,6 +158,27 @@ class RedisStore(DataStore):
         return self.client.get(key)
 
 
+class LocalExecutionStore(DataStore):
+    '''
+    A DataStore that issues a terminal command and uses its standard output as a template value.
+    '''
+
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+        try:
+            self.command = kwargs['command']
+        except IndexError:
+            logging.error(
+                'Cannot register local-exec store {} because no command has been supplied'\
+                .format(name))
+
+    def get_value(self, key, **kwargs):
+        subp_args = [ self.command ]
+        subp_args.extend(kwargs['arg'])
+        proc = subprocess.run(subp_args, capture_output=True)
+        return proc.stdout.decode('utf-8')
+
+
 class Retemplate(object):
     '''
     A class representing a single template and operations surrounding it.
@@ -150,6 +205,7 @@ class Retemplate(object):
             'frequency': 60
         }
         self.settings.update(kwargs)
+        self.vars = dict()
 
     def resolve_value(self, uri):
         '''
@@ -166,39 +222,66 @@ class Retemplate(object):
         url = urlparse(uri)
         qs = parse_qs(url.query)
 
-        # qs looks like this, with lists for values:
-        # {'param1': ['val1'], 'paramN': ['valN']}
-        # So just cat them together
-        for q in qs:
-            qs[q] = ''.join(qs[q])
-
         store = self.stores[url.netloc]
         key = url.path[1:] # path always starts with a '/'; cut it out
         value = store.get_value(key, **qs)
         logging.debug('Store {} got value \'{}\' for key \'{}\''.format(store.name, value, key))
         return value
 
-    def render(self):
-        '''
-        Renders a template in two phases. First, "rtpl" URIs are resolved (see resolve_value). Then,
-        the template is passed through the Jinja interpreter. The final text is returned.
-        '''
-
-        # Look for prerender values that match this URI format:
-        # rtpl://type?param1=val1&param2=val2
-        logging.info('Rendering template {} for target {}'.format(self.template, self.target))
+    def read_template(self):
         try:
             with open(self.template, 'r') as fh:
-                tpl = fh.read()
+                return fh.read()
         except IOError:
             logging.error('Cannot access template file {} for target {}'.format(
                 self.template, self.target))
             return False
 
+    def preprocess(self, tpl):
+        '''
+        Scan the template looking for lines with this kind of variable assignment in it:
+
+            {<message = rtpl://something>}
+
+        Then look for places where the variable gets used like this...
+
+            {<message>}
+
+        ...and replace those with the actual value.
+        '''
+
+        lines = tpl.split('\n')
+        stage_one = list()
+        stage_two = list()
+
+        for line in lines:
+            # Assignments must be the only thing on the line
+            match = re.search('^{<(.*)=(.*)>}$', line)
+            if match:
+                groups = [ gp.strip() for gp in match.groups() ]
+                if groups[1].startswith('rtpl://'):
+                    self.vars[groups[0]] = self.resolve_value(groups[1])
+                else:
+                    self.vars[groups[0]] = groups[1]
+            else:
+                stage_one.append(line)
+
+        for line in stage_one:
+            for var in self.vars:
+                line = line.replace('{{<{}>}}'.format(var), self.vars[var])
+            stage_two.append(line)
+
+        return '\n'.join(stage_two)
+
+    def process(self, tpl):
+        '''
+        Look for "rtpl://" URIs and replace them with the values they reference.
+        '''
+
         tpl = tpl.split('\n')
         prerender = list()
         for line in tpl:
-            match = re.search('(rtpl://.*)\s?', line)
+            match = re.search('(rtpl://[a-zA-Z0-9-_/=?&.]*)', line)
             if match:
                 groups = match.groups()
                 for group in groups:
@@ -206,8 +289,35 @@ class Retemplate(object):
                     if type(value) == bytes:
                         value = value.decode()
                     prerender.append(line.replace(group, value))
-        prerender = '\n'.join(prerender)
-        return jinja2.Template(prerender).render()
+            else:
+                prerender.append(line)
+        return '\n'.join(prerender)
+
+    def render(self):
+        '''
+        Renders a template in three phases:
+            1. The template is "preprocessed" looking for special variable assignments that look
+               like this: {<varname = rtpl://source/key>}. These are resolved and the variables
+               stored internally. Then, references to that variable are replaced with the value.
+               Variable references look like this: {<varname>}
+            2. Ordinary rtpl URIs are resolved.
+            3. The template is passed through the Jinja interpreter.
+        The final text is returned.
+
+        This three-phase approach allows you to build more complex lookups. For example, suppose you
+        need to look up the name of the environment the template is being run in with a local-exec
+        call, then later need to look up an AWS Secrets Manager value using that environment name.
+        You might have to do something like this:
+
+            {<env = rtpl://tag-finder/environment>}
+            password: rtpl://secrets/{<env>}.the_password
+        '''
+
+        logging.info('Rendering template {} for target {}'.format(self.template, self.target))
+        tpl = self.read_template()
+        tpl = self.preprocess(tpl)
+        tpl = self.process(tpl)
+        return jinja2.Template(tpl).render()
 
     def write_file(self, content):
         '''
@@ -270,7 +380,7 @@ class Retemplate(object):
                     current_version = fh.read()
             except IOError:
                 logging.error('Cannot read target file {}'.format(self.target))
-                break
+                current_version = None
 
             if new_version != current_version:
                 logging.info('New version of target {} detected'.format(self.target))
