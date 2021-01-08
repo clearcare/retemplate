@@ -11,17 +11,36 @@ import shutil
 import subprocess
 import sys
 
+from botocore.exceptions import ClientError
 from urllib.parse import urlparse, parse_qs
 from time import sleep
 
 # Custom exceptions
-class ConfigurationError(Exception):
+class RetemplateError(Exception):
+    pass
+
+
+class ConfigurationError(RetemplateError):
     '''
     Simple error to allow Retemplate to raise problems related to its own config
     '''
+
     def __init__(self, reason):
         self.reason = reason
 
+
+class RetrievalError(RetemplateError):
+    '''
+    Exception for anytime get_value throws an exception
+    '''
+    pass
+
+
+class RenderError(RetemplateError):
+    '''
+    Used when some aspect of the rendering process fails
+    '''
+    pass
 
 # Data stores
 class DataStore(object):
@@ -32,6 +51,7 @@ class DataStore(object):
     Arguments:
         name (str): An arbitrary name for the DataStore
     '''
+
     def __init__(self, name, *args, **kwargs):
         self.name = name
 
@@ -59,7 +79,9 @@ class AwsLocalMetadataServer(DataStore):
         resp = requests.get('http://169.254.169.254/{}'.format(key))
         if resp.status_code == 200:
             return resp.text
-        return ''
+        else:
+            logging.error('Got response code {} from AWS local metadata server'.format(resp.status_code))
+            raise RetrievalError
 
 
 class AwsSecretsManagerStore(DataStore):
@@ -68,6 +90,7 @@ class AwsSecretsManagerStore(DataStore):
     [boto3 client documentation]
     (https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html#boto3.session.Session.client).
     '''
+
     def __init__(self, name, *args, **kwargs):
         super().__init__(self, name, *args, **kwargs)
         # boto won't like our "type" key, so del it
@@ -85,7 +108,12 @@ class AwsSecretsManagerStore(DataStore):
 
         if 'SecretId' not in kwargs:
             kwargs['SecretId'] = key
-        return self.client.get_secret_value(**kwargs)['SecretString']
+        try:
+            return self.client.get_secret_value(**kwargs)['SecretString']
+        except ClientError as ex:
+            logging.error('Failed to retrieve secret {}; Error code: {}; Full error: {}'.format(
+                kwargs['SecretId'], ex.response['Error']['Code'], ex))
+            raise RetrievalError
 
 
 class AwsSystemsManagerStore(DataStore):
@@ -94,6 +122,7 @@ class AwsSystemsManagerStore(DataStore):
     [boto3 client documentation]
     (https://boto3.amazonaws.com/v1/documentation/api/latest/reference/core/session.html#boto3.session.Session.client).
     '''
+
     def __init__(self, name, *args, **kwargs):
         super().__init__(self, name, *args, **kwargs)
         # boto won't like our "type" key, so del it
@@ -121,7 +150,12 @@ class AwsSystemsManagerStore(DataStore):
         # if you are so inclined, you can override it in the query string.
         if 'Name' not in kwargs:
             kwargs['Name'] = key
-        return self.client.get_parameter(**kwargs)['Parameter']['Value']
+        try:
+            return self.client.get_parameter(**kwargs)['Parameter']['Value']
+        except ClientError as ex:
+            logging.error('Failed to retrieve parameter {}; Error code: {}; Full error: {}'.format(
+                kwargs['Name'], e.response['Error']['Code'], e))
+            raise RetrievalError
 
 
 class RedisStore(DataStore):
@@ -155,7 +189,11 @@ class RedisStore(DataStore):
 
     def get_value(self, key):
         logging.debug('RedisStore {} getting key {}'.format(self.name, key))
-        return self.client.get(key)
+        try:
+            return self.client.get(key)
+        except redis.exceptions.RedisError as ex:
+            logging.error('Failed to get Redis key {}; error: {}'.format(key, ex))
+        raise RetrievalError
 
 
 class LocalExecutionStore(DataStore):
@@ -173,10 +211,20 @@ class LocalExecutionStore(DataStore):
                 .format(name))
 
     def get_value(self, key, **kwargs):
-        subp_args = [ self.command ]
-        subp_args.extend(kwargs['arg'])
-        proc = subprocess.run(subp_args, capture_output=True)
-        return proc.stdout.decode('utf-8')
+        try:
+            subp_args = [ self.command ]
+            subp_args.extend(kwargs['arg'])
+
+            # Clean these args up a bit
+            for i in range(0, len(subp_args)):
+                subp_args[i] = subp_args[i].strip()
+
+            proc = subprocess.run(subp_args, capture_output=True)
+            output = proc.stdout.decode('utf-8').strip()
+            return output
+        except Exception as ex:
+            logging.error('Failed to get local execution data. Error: {}'.format(ex))
+        raise RetrievalError
 
 
 class Retemplate(object):
@@ -193,10 +241,11 @@ class Retemplate(object):
         frequency (int): The number of seconds to wait between executions of the template
     '''
 
-    def __init__(self, target, template, stores, **kwargs):
+    def __init__(self, target, template, stores, display_values, **kwargs):
         self.target = target
         self.template = template
         self.stores = stores
+        self.display_values = display_values
         self.settings = {
             'owner': None,
             'group': None,
@@ -223,9 +272,15 @@ class Retemplate(object):
         qs = parse_qs(url.query)
 
         store = self.stores[url.netloc]
-        key = url.path[1:] # path always starts with a '/'; cut it out
-        value = store.get_value(key, **qs)
-        logging.debug('Store {} got value \'{}\' for key \'{}\''.format(store.name, value, key))
+        key = url.path[1:].strip() # path always starts with a '/'; cut it out
+        try:
+            value = store.get_value(key, **qs)
+            if self.display_values:
+                logging.info('Store {} got value \'{}\' for key \'{}\' and query \'{}\''.format(
+                    store.name, value, key, url.query))
+        except RetrievalError:
+            logging.error('Failed to resolve value for URI: {}'.format(uri))
+            raise
         return value
 
     def read_template(self):
@@ -235,7 +290,7 @@ class Retemplate(object):
         except IOError:
             logging.error('Cannot access template file {} for target {}'.format(
                 self.template, self.target))
-            return False
+            raise
 
     def preprocess(self, tpl):
         '''
@@ -254,24 +309,24 @@ class Retemplate(object):
         stage_one = list()
         stage_two = list()
 
-        for line in lines:
+        for i in range(0, len(lines)):
             # Assignments must be the only thing on the line
-            match = re.search('^{<(.*)=(.*)>}$', line)
+            match = re.search('^{<\s+([a-zA-Z0-9_]*)\s+=\s+(rtpl://.*)>}$', lines[i])
             if match:
-                groups = [ gp.strip() for gp in match.groups() ]
+                groups = match.groups()
                 if groups[1].startswith('rtpl://'):
                     self.vars[groups[0]] = self.resolve_value(groups[1])
                 else:
                     self.vars[groups[0]] = groups[1]
+                # Now update all future lines so they get parsed right
+                for j in range(i, len(lines)):
+                    for var in self.vars:
+                        lines[j] = lines[j].replace('{{<{}>}}'.format(var), self.vars[var])
             else:
-                stage_one.append(line)
+                stage_one.append(lines[i])
 
-        for line in stage_one:
-            for var in self.vars:
-                line = line.replace('{{<{}>}}'.format(var), self.vars[var])
-            stage_two.append(line)
 
-        return '\n'.join(stage_two)
+        return '\n'.join(stage_one)
 
     def process(self, tpl):
         '''
@@ -314,9 +369,27 @@ class Retemplate(object):
         '''
 
         logging.info('Rendering template {} for target {}'.format(self.template, self.target))
-        tpl = self.read_template()
-        tpl = self.preprocess(tpl)
-        tpl = self.process(tpl)
+        try:
+            tpl = self.read_template()
+        except IOError:
+            logging.error('Rendering of {} failed because the file could not be read'.format(
+                self.template))
+            raise RenderError
+
+        try:
+            tpl = self.preprocess(tpl)
+        except RetrievalError:
+            logging.error('Rendering of {} failed because of an error in preprocessing'.format(
+                self.template))
+            raise RenderError
+
+        try:
+            tpl = self.process(tpl)
+        except RetrievalError:
+            logging.error('Rendering of {} failed because of an error in processing'.format(
+                self.template))
+            raise RenderError
+
         return jinja2.Template(tpl).render()
 
     def write_file(self, content):
@@ -372,23 +445,26 @@ class Retemplate(object):
         '''
 
         while True:
-            new_version = self.render()
-            if not new_version:
-                break
             try:
-                with open(self.target, 'r') as fh:
-                    current_version = fh.read()
-            except IOError:
-                logging.error('Cannot read target file {}'.format(self.target))
-                current_version = None
+                new_version = self.render()
+                try:
+                    with open(self.target, 'r') as fh:
+                        current_version = fh.read()
+                except IOError:
+                    logging.error('Cannot read target file {}'.format(self.target))
+                    current_version = None
 
-            if new_version != current_version:
-                logging.info('New version of target {} detected'.format(self.target))
-                if not self.write_file(new_version):
-                    break
-                self.execute_onchange()
-            else:
-                logging.info('Target {} is unchanged'.format(self.target))
+                    if new_version != current_version:
+                        logging.info('New version of target {} detected'.format(self.target))
+                        if not self.write_file(new_version):
+                            break
+                            self.execute_onchange()
+                        else:
+                            logging.info('Target {} is unchanged'.format(self.target))
+            except RenderError:
+                # At this point, plenty of errors have been emitted; there is nothing else to say.
+                # Just move on and wait to try again when the time comes.
+                pass
 
             logging.info('Waiting {} seconds to run target {} again'.format(
                 self.settings['frequency'], self.target))
