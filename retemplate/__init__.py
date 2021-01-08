@@ -454,13 +454,14 @@ class Retemplate(object):
                     logging.error('Cannot read target file {}'.format(self.target))
                     current_version = None
 
-                    if new_version != current_version:
-                        logging.info('New version of target {} detected'.format(self.target))
-                        if not self.write_file(new_version):
-                            break
-                            self.execute_onchange()
-                        else:
-                            logging.info('Target {} is unchanged'.format(self.target))
+                if new_version != current_version:
+                    logging.info('New version of target {} detected'.format(self.target))
+                    if not self.write_file(new_version):
+                        logging.error('Could not write file {}'.format(self.target))
+                        break
+                    self.execute_onchange()
+                else:
+                    logging.info('Target {} is unchanged'.format(self.target))
             except RenderError:
                 # At this point, plenty of errors have been emitted; there is nothing else to say.
                 # Just move on and wait to try again when the time comes.
