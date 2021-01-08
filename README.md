@@ -148,6 +148,7 @@ Retemplate needs to know what files to template and various other options about 
         chmod: 0600
         onchange: supervisorctl restart hiapi
         frequency: 60
+        random_offset_max: 30
 
 Here, `templates` is the root-level option underneath which all of your templates will be defined. The filename after that (`/opt/hiapi/config.txt`) is the destination for the rendered file. Referencing this config, here is what the rest of the values mean.
 
@@ -157,11 +158,12 @@ Here, `templates` is the root-level option underneath which all of your template
 * **chmod**: *After rendering the template, this is the octal-format permission for the file.*
 * **onchange**: *If the rendered file differs from what was there before, this is a command that will be executed. This should be used for reloading services after their config files have changed.*
 * **frequency**: *The number of seconds to wait between template renders.*
+* **random_offset_max**: *When present, this causes the rendering process to wait an additional amount of time - up to this number of seconds - before it gets underway. This is designed to prevent the alignment of jobs such that they all make API calls or disk access requests simultaneously. If not set, there is no additional time offset.*
 
 ## Writing Templates
 The template rendering process is a three-stage one:
 
-1. The template is pre-processed for template variable assignments. These are first looked up, and then references to the variables are substituted before stage two.
+1. The template is pre-processed for template variable assignments. These are first looked up, and then references to the variables are substituted. This happens per-line, in a scan-ahead manner, so that variables defined at the top of a file can be used as part of an rtpl:// URI later in the file (see example below).
 2. The template is processed to do non-variable lookups of values. These references are then substituted.
 3. The template is run through the Jinja2 rendering process.
 
@@ -199,6 +201,7 @@ To accomplish this, you might start with a configuration that looks like this:
           chmod: 0600
           onchange: systemctl restart agent
           frequency: 60
+          random_offset_max: 30
 
 You would then write the template that lives at `/etc/retemplate/agent.config.ini.j2` to look something like this:
 
