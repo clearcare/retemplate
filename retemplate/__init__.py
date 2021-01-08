@@ -4,6 +4,7 @@ import boto3
 import jinja2
 import logging
 import os
+import random
 import re
 import redis
 import requests
@@ -251,7 +252,8 @@ class Retemplate(object):
             'group': None,
             'chmod': 600,
             'onchange': None,
-            'frequency': 60
+            'frequency': 60,
+            'random_offset_max': None
         }
         self.settings.update(kwargs)
         self.vars = dict()
@@ -367,6 +369,13 @@ class Retemplate(object):
             {<env = rtpl://tag-finder/environment>}
             password: rtpl://secrets/{<env>}.the_password
         '''
+
+        # Optionally stagger renders to avoid "thundering herd" effect when running this from many hosts
+        if self.settings.get('random_offset_max'):
+            offset = random.randint(1, self.settings['random_offset_max'])
+            logging.info('Waiting an additional {} seconds to render target {}'.format(
+                offset, self.target))
+            sleep(offset)
 
         logging.info('Rendering template {} for target {}'.format(self.template, self.target))
         try:
