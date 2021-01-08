@@ -23,6 +23,10 @@ def parseargs():
     parser.add_argument('-c', '--config',
                         help='Config file to read in',
                         default='config.yml')
+    parser.add_argument('-v', '--values',
+                        help='Log all values retrieved from data stores',
+                        default=False,
+                        action='store_true')
     return parser.parse_args()
 
 def main():
@@ -49,7 +53,8 @@ def main():
     logcfg = {
         'level': 'INFO',
         'filename': None,
-        'format': None
+        'format': '%(levelname)s %(asctime)s %(message)s',
+        'style': '%'
     }
     if 'retemplate' in config and 'logging' in config['retemplate']:
         logcfg.update(config['retemplate']['logging'])
@@ -59,22 +64,22 @@ def main():
     # Configure DataStores
     for store in config['stores']:
         if config['stores'][store]['type'] == 'aws-local-meta':
-            stores[store] = retemplate.AwsLocalMetadataServer(store, **config['stores'][store])
+            stores[store] = retemplate.AwsLocalMetadataServer(store, args.values, **config['stores'][store])
         if config['stores'][store]['type'] == 'aws-secrets-manager':
-            stores[store] = retemplate.AwsSecretsManagerStore(store, **config['stores'][store])
+            stores[store] = retemplate.AwsSecretsManagerStore(store, args.values, **config['stores'][store])
         if config['stores'][store]['type'] == 'aws-systems-manager':
-            stores[store] = retemplate.AwsSystemsManagerStore(store, **config['stores'][store])
+            stores[store] = retemplate.AwsSystemsManagerStore(store, args.values, **config['stores'][store])
         if config['stores'][store]['type'] == 'local-exec':
-            stores[store] = retemplate.LocalExecutionStore(store, **config['stores'][store])
+            stores[store] = retemplate.LocalExecutionStore(store, args.values, **config['stores'][store])
         if config['stores'][store]['type'] == 'redis':
-            stores[store] = retemplate.RedisStore(store, **config['stores'][store])
+            stores[store] = retemplate.RedisStore(store, args.values, **config['stores'][store])
         logging.debug('Configured data store {}'.format(store))
 
     # Configure templates
     for target in config['templates']:
         template = config['templates'][target]['template']
         del(config['templates'][target]['template'])
-        tpl = retemplate.Retemplate(target, template, stores, **config['templates'][target])
+        tpl = retemplate.Retemplate(target, template, stores, args.values, **config['templates'][target])
         templates.append(tpl)
         logging.debug('Configured template for target {}'.format(target))
 

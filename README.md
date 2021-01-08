@@ -172,9 +172,9 @@ These are contained by curly and angle braces and look like this in a template:
 
 They are then referenced in the same way, but without the assignment portion:
 
-    {< var_name >}
+    {<var_name>}
 
-Whitespace between the braces is ignored, so `{< var_name >}` is equivalent to `{<var_name>}`.
+Referenced variables must be absent of whitespace.
 
 ### Example
 Let's consider a case where you need to configure an agent with an API key, but that API key varies depending on which environment your system runs in. Further, let's say you have a script on the server that, when run, emits the name of the environment, and that environment name is then used to look up the API key in AWS Secrets Manager.
