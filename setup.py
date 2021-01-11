@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='retemplate',
-    version='0.0.7',
+    version='0.0.8',
     description="A module to execute a Jinja template on a schedule, supporting several backends for value storage",
     url='https://github.com/ryanjjung/retemplate',
     author='Ryan Jung',

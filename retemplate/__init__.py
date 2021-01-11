@@ -410,10 +410,12 @@ class Retemplate(object):
         '''
 
         try:
+            logging.info("Writing {}; setting ownership to {}:{} and mode to {}".format(
+                self.target, self.settings['owner'], self.settings['group'], self.settings['chmod']))
             with open(self.target, 'w') as fh:
                 fh.write(content)
             shutil.chown(self.target, user=self.settings['owner'], group=self.settings['group'])
-            os.chmod(self.target, self.settings['chmod'])
+            subprocess.run([ 'chmod', settings['chmod'], self.target ])
             return True
         except IOError:
             logging.error('Cannot write target file {}'.format(self.target))
