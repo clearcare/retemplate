@@ -21,6 +21,15 @@ Place a `config.yml` file in the cwd, or specify a config file with `-c`.
 
     rtpl -c /etc/retemplate.yml
 
+rtpl also supports the `-l` or `--logfile` option, which sets the initial log file for the software.
+A very small number of startup messages are logged before the log configuration is processed. On
+Python versions prior to 3.8, the `basicConfig` function does not accept the `force` option, which
+allows rtpl to reconfigure an existing logger. So if you run Python 3.8 or later, you can just
+configure logging in the config file, and you'll only lose a couple mostly insignificant messages.
+On older Pythons, all logging will be lost if you don't establish the filename at launch time. Older
+Pythons also will not allow custom log formats, etc. **It is strongly recommended that you run
+Retemplate on Python 3.8 or later.**
+
 ## Use Case
 Let's say you have an instance of [PyHiAPI](https://github.com/ryanjjung/pyhiapi) running out of `/opt/hiapi` and it is kept alive by a [supervisord](http://supervisord.org/) configuration. Furthermore, let's say the message returned by HiAPI should match the value stored in a Redis server in a key called `hiapi.message`. So you feed `-c /opt/hiapi/config.txt` to hiapi in your supervisord config so it cares about the content of that file. Then you configure Retemplate to generate that file based on a template. You might create a template at `/etc/retemplate/hiapi.config.j2` that looks like this:
 
