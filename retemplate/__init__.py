@@ -415,7 +415,7 @@ class Retemplate(object):
             with open(self.target, 'w') as fh:
                 fh.write(content)
             shutil.chown(self.target, user=self.settings['owner'], group=self.settings['group'])
-            subprocess.run([ 'chmod', settings['chmod'], self.target ])
+            subprocess.run([ 'chmod', self.settings['chmod'], self.target ])
             return True
         except IOError:
             logging.error('Cannot write target file {}'.format(self.target))
