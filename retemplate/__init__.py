@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, NoCredentialsError
 from urllib.parse import urlparse, parse_qs
 from time import sleep
 
@@ -115,6 +115,9 @@ class AwsSecretsManagerStore(DataStore):
             logging.error('Failed to retrieve secret {}; Error code: {}; Full error: {}'.format(
                 kwargs['SecretId'], ex.response['Error']['Code'], ex))
             raise RetrievalError
+        except NoCredentialsError:
+            logging.error('Could not retrieve secret because no AWS credentials were supplied')
+            raise RetrievalError
 
 
 class AwsSystemsManagerStore(DataStore):
@@ -156,6 +159,9 @@ class AwsSystemsManagerStore(DataStore):
         except ClientError as ex:
             logging.error('Failed to retrieve parameter {}; Error code: {}; Full error: {}'.format(
                 kwargs['Name'], e.response['Error']['Code'], e))
+            raise RetrievalError
+        except NoCredentialsError:
+            logging.error('Could not retrieve parameter because no AWS credentials were supplied')
             raise RetrievalError
 
 
@@ -272,6 +278,11 @@ class Retemplate(object):
 
         url = urlparse(uri)
         qs = parse_qs(url.query)
+        default = None
+        if 'rtpl_default' in qs:
+            default = ''.join(qs['rtpl_default'])
+            # The value must be removed to prevent it from being passed into the data store call
+            del(qs['rtpl_default'])
 
         store = self.stores[url.netloc]
         key = url.path[1:].strip() # path always starts with a '/'; cut it out
@@ -281,8 +292,13 @@ class Retemplate(object):
                 logging.info('Store {} got value \'{}\' for key \'{}\' and query \'{}\''.format(
                     store.name, value, key, url.query))
         except RetrievalError:
-            logging.error('Failed to resolve value for URI: {}'.format(uri))
-            raise
+            if not default:
+                logging.error('Failed to resolve value for URI: {}'.format(uri))
+                raise
+            else:
+                logging.error('Failed to resolve value for URI: {}, using default value: {}'.format(
+                    uri, default))
+                value = default
         return value
 
     def read_template(self):

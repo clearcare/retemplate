@@ -49,7 +49,7 @@ Then create a config file for retemplate that contains these elements:
         template: /etc/retemplate/hiapi.config.j2
         owner: root
         group: root
-        chmod: 0600
+        chmod: "0600"
         frequency: 60
         onchange: supervisorctl restart hiapi
 
@@ -154,7 +154,7 @@ Retemplate needs to know what files to template and various other options about 
         template: /etc/retemplate/hiapi.config.j2
         owner: root
         group: root
-        chmod: 0600
+        chmod: "0600"
         onchange: supervisorctl restart hiapi
         frequency: 60
         random_offset_max: 30
@@ -164,7 +164,7 @@ Here, `templates` is the root-level option underneath which all of your template
 * **template**: *The source file, the unrendered template itself.*
 * **owner**: *After rendering the template, the file will be owned by this user.*
 * **group**: *After rendering the template, the file will be owned by this group.*
-* **chmod**: *After rendering the template, this is the octal-format permission for the file.*
+* **chmod**: *After rendering the template, this is the octal-format permission for the file. It must be a string, and due to how YAML interprets numerical values, you must explicitly surround the value with quotes to ensure it is interpreted as a string.*
 * **onchange**: *If the rendered file differs from what was there before, this is a command that will be executed. This should be used for reloading services after their config files have changed. This value can be omitted if it is unnecessary. Retemplate will emit a log event saying no onchange command is to be run.*
 * **frequency**: *The number of seconds to wait between template renders.*
 * **random_offset_max**: *When present, this causes the rendering process to wait an additional amount of time - up to this number of seconds - before it gets underway. This is designed to prevent the alignment of jobs such that they all make API calls or disk access requests simultaneously. If not set, there is no additional time offset.*
@@ -187,6 +187,13 @@ They are then referenced in the same way, but without the assignment portion:
 
 Referenced variables must be absent of whitespace.
 
+### Default Values
+If you want a failure to retrieve a value to not cause a failure to render a template, you can provide a default value by using the special `rtpl_default` argument in the URI. Consider this bit of template:
+
+    rtpl://secrets-manager/key?rtpl_default=Blah
+
+In this case, if the secrets-manager store fails to find the key, it will use the provided default value of "Blah" instead.
+
 ### Example
 Let's consider a case where you need to configure an agent with an API key, but that API key varies depending on which environment your system runs in. Further, let's say you have a script on the server that, when run, emits the name of the environment, and that environment name is then used to look up the API key in AWS Secrets Manager.
 
@@ -207,7 +214,7 @@ To accomplish this, you might start with a configuration that looks like this:
           template: /etc/retemplate/agent.config.ini.j2
           owner: agent
           group: agent
-          chmod: 0600
+          chmod: "0600"
           onchange: systemctl restart agent
           frequency: 60
           random_offset_max: 30
