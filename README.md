@@ -165,7 +165,7 @@ Here, `templates` is the root-level option underneath which all of your template
 * **owner**: *After rendering the template, the file will be owned by this user.*
 * **group**: *After rendering the template, the file will be owned by this group.*
 * **chmod**: *After rendering the template, this is the octal-format permission for the file.*
-* **onchange**: *If the rendered file differs from what was there before, this is a command that will be executed. This should be used for reloading services after their config files have changed.*
+* **onchange**: *If the rendered file differs from what was there before, this is a command that will be executed. This should be used for reloading services after their config files have changed. This value can be omitted if it is unnecessary. Retemplate will emit a log event saying no onchange command is to be run.*
 * **frequency**: *The number of seconds to wait between template renders.*
 * **random_offset_max**: *When present, this causes the rendering process to wait an additional amount of time - up to this number of seconds - before it gets underway. This is designed to prevent the alignment of jobs such that they all make API calls or disk access requests simultaneously. If not set, there is no additional time offset.*
 
