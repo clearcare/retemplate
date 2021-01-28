@@ -187,6 +187,13 @@ They are then referenced in the same way, but without the assignment portion:
 
 Referenced variables must be absent of whitespace.
 
+### Default Values
+If you want a failure to retrieve a value to not cause a failure to render a template, you can provide a default value by using the special `rtpl_default` argument in the URI. Consider this bit of template:
+
+    rtpl://secrets-manager/key?rtpl_default=Blah
+
+In this case, if the secrets-manager store fails to find the key, it will use the provided default value of "Blah" instead.
+
 ### Example
 Let's consider a case where you need to configure an agent with an API key, but that API key varies depending on which environment your system runs in. Further, let's say you have a script on the server that, when run, emits the name of the environment, and that environment name is then used to look up the API key in AWS Secrets Manager.
 

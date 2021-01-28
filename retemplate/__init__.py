@@ -292,10 +292,12 @@ class Retemplate(object):
                 logging.info('Store {} got value \'{}\' for key \'{}\' and query \'{}\''.format(
                     store.name, value, key, url.query))
         except RetrievalError:
-            logging.error('Failed to resolve value for URI: {}'.format(uri))
             if not default:
+                logging.error('Failed to resolve value for URI: {}'.format(uri))
                 raise
             else:
+                logging.error('Failed to resolve value for URI: {}, using default value: {}'.format(
+                    uri, default))
                 value = default
         return value
 
