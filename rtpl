@@ -43,7 +43,6 @@ def read_config(path):
         logging.error('Could not read config file: {}'.format(args.config))
         return None
 
-
 def get_configs(includes):
     if len(includes) > 0:
         for include in includes:
@@ -105,14 +104,13 @@ def main():
         get_configs(base_config['retemplate']['include'])
     config = merge_configs(base_config)
 
-    logging.info('Retemplate loaded with this configuration:\n{}'.format(json.dumps(config, indent=2)))
-
     # Update logging config based on user configs if Python allows it
     if 'retemplate' in config and 'logging' in config['retemplate'] and sys.version_info.minor >= 8:
         logcfg.update(config['retemplate']['logging'])
         logging.basicConfig(**logcfg)
         logging.debug('Logging configured')
 
+    logging.info('Retemplate loaded with this configuration:\n{}'.format(json.dumps(config, indent=2)))
 
     # Configure DataStores
     for store in config['stores']:
