@@ -220,12 +220,14 @@ class LocalExecutionStore(DataStore):
     def get_value(self, key, **kwargs):
         try:
             subp_args = [ self.command ]
-            subp_args.extend(kwargs['arg'])
+            if 'arg' in kwargs:
+                subp_args.extend(kwargs['arg'])
 
             # Clean these args up a bit
             for i in range(0, len(subp_args)):
                 subp_args[i] = subp_args[i].strip()
 
+            logging.debug('Running command: {}'.format(' '.join(subp_args)))
             proc = subprocess.run(subp_args, capture_output=True)
             output = proc.stdout.decode('utf-8').strip()
             return output
@@ -256,7 +258,7 @@ class Retemplate(object):
         self.settings = {
             'owner': None,
             'group': None,
-            'chmod': 600,
+            'chmod': None,
             'onchange': None,
             'frequency': 60,
             'random_offset_max': None
@@ -426,12 +428,18 @@ class Retemplate(object):
         '''
 
         try:
-            logging.info("Writing {}; setting ownership to {}:{} and mode to {}".format(
-                self.target, self.settings['owner'], self.settings['group'], self.settings['chmod']))
+            logging.info('Writing {}'.format(self.target))
             with open(self.target, 'w') as fh:
                 fh.write(content)
-            shutil.chown(self.target, user=self.settings['owner'], group=self.settings['group'])
-            subprocess.run([ 'chmod', self.settings['chmod'], self.target ])
+            owner = self.settings['owner'] if 'owner' in self.settings else None
+            group = self.settings['group'] if 'group' in self.settings else None
+            chmod = self.settings['chmod'] if 'chmod' in self.settings else None
+            if owner or group:
+                logging.info('Setting ownership of {} to {}:{}'.format(self.target, owner, group))
+                shutil.chown(self.target, user=owner, group=group)
+            if chmod:
+                logging.info('Setting mode of {} to {}'.format(self.target, chmod))
+                subprocess.run([ 'chmod', self.settings['chmod'], self.target ])
             return True
         except IOError:
             logging.error('Cannot write target file {}'.format(self.target))
