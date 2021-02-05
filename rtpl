@@ -1,5 +1,6 @@
 #!/bin/env python3
 
+import glob
 import logging
 import json
 import retemplate
@@ -13,6 +14,8 @@ from threading import Thread
 This file serves as an entry point to the module's features, and is the recommended method of
 executing templates.
 '''
+
+all_configs = list()
 
 def parseargs():
     '''
@@ -31,6 +34,43 @@ def parseargs():
                         default=False,
                         action='store_true')
     return parser.parse_args()
+
+def read_config(path):
+    try:
+        with open(path, 'r') as fh:
+            return yaml.load(fh.read(), Loader=yaml.FullLoader)
+    except IOError:
+        logging.error('Could not read config file: {}'.format(args.config))
+        return None
+
+def get_configs(includes):
+    if len(includes) > 0:
+        for include in includes:
+            files = glob.glob(include)
+            for file in files:
+                config = read_config(file)
+                if config:
+                    all_configs.append(config)
+                    if 'retemplate' in config and 'include' in config['retemplate']:
+                        get_configs(config['retemplate']['include'])
+
+def deep_merge(d, u):
+    for k, v in u.items():
+        if isinstance(v, dict):
+            d[k] = deep_merge(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
+
+def merge_configs(base_config):
+    # logging.info('Base config: {}'.format(json.dumps(base_config, indent=2)))
+    for config in all_configs:
+        # logging.info('Merging in config: {}'.format(json.dumps(config, indent=2)))
+        base_config = deep_merge(base_config, config)
+        # logging.info('Base config after merge: {}'.format(json.dumps(base_config, indent=2)))
+    if 'retemplate' in base_config and 'include' in base_config['retemplate']:
+        del(base_config['retemplate']['include'])
+    return base_config
 
 def main():
     '''
@@ -54,25 +94,23 @@ def main():
     logging.basicConfig(**logcfg)
 
     logging.info('Starting up Retemplate')
-    config = dict()
     stores = dict()
     templates = list()
     threads = list()
 
-    # Parse the config file
-    logging.info('Parsing config file at {}'.format(args.config))
-    try:
-        with open(args.config, 'r') as fh:
-            config = yaml.load(fh.read(), Loader=yaml.FullLoader)
-    except IOError:
-        logging.error('Could not read config file: {}'.format(args.config))
-        sys.exit(1)
+    # Parse config files
+    base_config = read_config(args.config)
+    if base_config and 'retemplate' in base_config and 'include' in base_config['retemplate']:
+        get_configs(base_config['retemplate']['include'])
+    config = merge_configs(base_config)
 
     # Update logging config based on user configs if Python allows it
     if 'retemplate' in config and 'logging' in config['retemplate'] and sys.version_info.minor >= 8:
         logcfg.update(config['retemplate']['logging'])
         logging.basicConfig(**logcfg)
         logging.debug('Logging configured')
+
+    logging.info('Retemplate loaded with this configuration:\n{}'.format(json.dumps(config, indent=2)))
 
     # Configure DataStores
     for store in config['stores']:

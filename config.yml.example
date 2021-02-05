@@ -3,6 +3,8 @@ retemplate:
     level: INFO
     filename: retemplate.log
     format: '%(levelname)s,%(asctime)s,%(funcName)s,%(message)s'
+  include:
+    - /etc/retemplate/conf.d/*.yml
 stores:
   ec2-metadata:
     type: aws-local-meta

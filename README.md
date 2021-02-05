@@ -67,7 +67,15 @@ Retemplate is configured with a YAML file consisting of three main sections:
 * `templates` (which files get worked over)
 
 ### Global Settings
-Global settings come under the `retemplate` section. Currently, the only globally adjustable setting is `logging`, wherein you can supply options to pass into the Python logger library's [basicConfig function](https://docs.python.org/3/library/logging.html#logging.basicConfig). [config.yml.example](config.yml.example) shows a few simple options.
+Global settings come under the `retemplate` section.
+
+#### logging
+In the `logging` section, you can supply options to pass into the Python logger library's [basicConfig function](https://docs.python.org/3/library/logging.html#logging.basicConfig). [config.yml.example](config.yml.example) shows a few simple options.
+
+#### include
+This is a list of other YAML config files to include. Regardless of where in your config file this option appears, Retemplate will always interpret them in the order listed, **after** completing the interpretation of the config file the directive is found in. Options found in those config files will override conflicting options discovered beforehand. In other words, configs read by include directives will take precedence.
+
+You can use regular expressions to indicate inclusion of all files matching the string. For example, to include all YAML files in a directory, you could use `/etc/retemplate/conf.d/*.yml`. Any value supported by Python's [glob.glob function](https://docs.python.org/3/library/glob.html#glob.glob) is valid here.
 
 ### Data Stores
 The `stores` section defines your data stores, which are services or functions that retrieve data for templating purposes. There are currently five types of data stores, each with their own configuration options. In the configuration file, these are defined by a dictionary entry where the key is the name of the data store as it will be referenced later in templates and the value is a dictionary of configuration options to be passed into that data store. Although specific configurations may vary between data stores, they all have a `type`, defined below.
@@ -168,6 +176,8 @@ Here, `templates` is the root-level option underneath which all of your template
 * **onchange**: *If the rendered file differs from what was there before, this is a command that will be executed. This should be used for reloading services after their config files have changed. This value can be omitted if it is unnecessary. Retemplate will emit a log event saying no onchange command is to be run.*
 * **frequency**: *The number of seconds to wait between template renders.*
 * **random_offset_max**: *When present, this causes the rendering process to wait an additional amount of time - up to this number of seconds - before it gets underway. This is designed to prevent the alignment of jobs such that they all make API calls or disk access requests simultaneously. If not set, there is no additional time offset.*
+
+The `owner`, `group`, and `chmod` options are technically optional. If you do not supply them, the OS will leave these at the defaults for the user that Retemplate is running as. Because this software often runs as `root`, that could leave your files unreadable by the programs that need to use them. It is recommended that you explicitly set these options.
 
 ## Writing Templates
 The template rendering process is a three-stage one:
