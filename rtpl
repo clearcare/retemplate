@@ -41,7 +41,7 @@ def read_config(path):
             return yaml.load(fh.read(), Loader=yaml.FullLoader)
     except IOError:
         logging.error('Could not read config file: {}'.format(args.config))
-        sys.exit(1)
+        return None
 
 
 def get_configs(includes):
@@ -50,9 +50,10 @@ def get_configs(includes):
             files = glob.glob(include)
             for file in files:
                 config = read_config(file)
-                all_configs.append(config)
-                if 'retemplate' in config and 'include' in config['retemplate']:
-                    get_configs(config['retemplate']['include'])
+                if config:
+                    all_configs.append(config)
+                    if 'retemplate' in config and 'include' in config['retemplate']:
+                        get_configs(config['retemplate']['include'])
 
 def deep_merge(d, u):
     for k, v in u.items():
@@ -100,7 +101,7 @@ def main():
 
     # Parse config files
     base_config = read_config(args.config)
-    if 'retemplate' in base_config and 'include' in base_config['retemplate']:
+    if base_config and 'retemplate' in base_config and 'include' in base_config['retemplate']:
         get_configs(base_config['retemplate']['include'])
     config = merge_configs(base_config)
 
