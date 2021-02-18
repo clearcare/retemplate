@@ -1,0 +1,18 @@
+[Unit]
+Description=Retemplate (rtpl): Scheduled template rendering
+Documentation=https://github.com/ryanjjung/retemplate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+Group=root
+PIDFile=/var/run/rtpl/rtpl.pid
+Type=simple
+ExecStart=/usr/local/bin/rtpl -c /etc/retemplate/retemplate.yml -l /var/log/retemplate.log
+ExecStop=/bin/kill -TERM ${MAINPID}
+Restart=always
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
