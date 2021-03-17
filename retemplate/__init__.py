@@ -203,6 +203,25 @@ class RedisStore(DataStore):
         raise RetrievalError
 
 
+class ProcessExecutor():
+    '''
+    A simple class to encapsulate the execution of external function calls.
+    '''
+
+    def exec_process(cmd):
+        '''
+        Shells out an external process and gets the stdout/stderr and returncoce.
+        '''
+        logging.debug('Running command: {}'.format(cmd))
+        p = subprocess.Popen(cmd,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT,
+                             universal_newlines=True,
+                             shell=True)
+        output = p.communicate()[0]
+        returncode = p.returncode
+        return output, returncode
+
 class LocalExecutionStore(DataStore):
     '''
     A DataStore that issues a terminal command and uses its standard output as a template value.
@@ -226,10 +245,7 @@ class LocalExecutionStore(DataStore):
             # Clean these args up a bit
             for i in range(0, len(subp_args)):
                 subp_args[i] = subp_args[i].strip()
-
-            logging.debug('Running command: {}'.format(' '.join(subp_args)))
-            proc = subprocess.run(subp_args, capture_output=True)
-            output = proc.stdout.decode('utf-8').strip()
+            output, _ = ProcessExecutor.exec_process(' '.join(subp_args))
             return output
         except Exception as ex:
             logging.error('Failed to get local execution data. Error: {}'.format(ex))
@@ -335,9 +351,9 @@ class Retemplate(object):
             if match:
                 groups = match.groups()
                 if groups[1].startswith('rtpl://'):
-                    self.vars[groups[0]] = self.resolve_value(groups[1])
+                    self.vars[groups[0]] = self.resolve_value(groups[1]).strip()
                 else:
-                    self.vars[groups[0]] = groups[1]
+                    self.vars[groups[0]] = groups[1].strip()
                 # Now update all future lines so they get parsed right
                 for j in range(i, len(lines)):
                     for var in self.vars:
@@ -439,7 +455,7 @@ class Retemplate(object):
                 shutil.chown(self.target, user=owner, group=group)
             if chmod:
                 logging.info('Setting mode of {} to {}'.format(self.target, chmod))
-                subprocess.run([ 'chmod', self.settings['chmod'], self.target ])
+                ProcessExecutor.exec_process(' '.join([ 'chmod', self.settings['chmod'], self.target ]))
             return True
         except IOError:
             logging.error('Cannot write target file {}'.format(self.target))
@@ -459,9 +475,9 @@ class Retemplate(object):
 
         logging.info('Running onchange command \'{}\' for target {}'.format(onchange, self.target))
         try:
-            proc = subprocess.run(onchange.split(' '), capture_output=True)
-            logging.debug('onchange command exited: {}'.format(proc.returncode))
-            logging.debug('onchange command output: {}'.format(proc.stdout))
+            output, returncode = ProcessExecutor.exec_process(onchange)
+            logging.debug('onchange command exited: {}'.format(returncode))
+            logging.debug('onchange command output: {}'.format(output))
         except subprocess.CalledProcessError as ex:
             logging.error('[{}] Couldn\'t call process {}'.format(target, onchange))
             logging.error(ex)
