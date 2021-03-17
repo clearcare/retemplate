@@ -351,9 +351,9 @@ class Retemplate(object):
             if match:
                 groups = match.groups()
                 if groups[1].startswith('rtpl://'):
-                    self.vars[groups[0]] = self.resolve_value(groups[1])
+                    self.vars[groups[0]] = self.resolve_value(groups[1]).strip()
                 else:
-                    self.vars[groups[0]] = groups[1]
+                    self.vars[groups[0]] = groups[1].strip()
                 # Now update all future lines so they get parsed right
                 for j in range(i, len(lines)):
                     for var in self.vars:
