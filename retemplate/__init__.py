@@ -245,7 +245,7 @@ class LocalExecutionStore(DataStore):
             # Clean these args up a bit
             for i in range(0, len(subp_args)):
                 subp_args[i] = subp_args[i].strip()
-            output, _ = ProcessExecutor.exec_process(' '.join(subp_args))
+            output, _ = ProcessExecutor.exec_process(''.join(subp_args))
             return output
         except Exception as ex:
             logging.error('Failed to get local execution data. Error: {}'.format(ex))
